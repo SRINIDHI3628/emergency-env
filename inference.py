@@ -16,7 +16,10 @@ import argparse
 import time
 from typing import Dict, Any
 
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
 
 from env.environment import EmergencyEnv
 from tasks import TASKS
@@ -28,11 +31,15 @@ HF_TOKEN     = os.getenv("HF_TOKEN",     "")
 OPENAI_KEY   = os.getenv("OPENAI_API_KEY", "")
 
 # Initialize OpenAI client
-if HF_TOKEN or OPENAI_KEY:
-    client = OpenAI(
-        base_url=API_BASE_URL,
-        api_key=HF_TOKEN or OPENAI_KEY,
-    )
+if (HF_TOKEN or OPENAI_KEY) and OpenAI is not None:
+    try:
+        client = OpenAI(
+            base_url=API_BASE_URL,
+            api_key=HF_TOKEN or OPENAI_KEY,
+        )
+    except Exception as e:
+        print(f"[WARN] Failed to initialize OpenAI client: {e}")
+        client = None
 else:
     client = None  # Will use fallback
 
