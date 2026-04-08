@@ -1,0 +1,87 @@
+name: EmergencyResourceAllocationEnv
+version: "1.0.0"
+description: >
+  Simulation environment for emergency medical resource allocation.
+  An AI agent dispatches ambulances and assigns patients to hospitals
+  based on severity, capacity, and proximity.
+
+domain: healthcare
+problem_type: resource_allocation
+difficulty: medium
+
+environment:
+  class: EmergencyEnv
+  module: env.environment
+  methods:
+    - reset
+    - step
+    - state
+
+state_space:
+  hospitals:
+    type: list
+    description: List of hospitals with capacity and location
+  ambulances:
+    type: list
+    description: List of ambulances with availability and location
+  current_patient:
+    type: object
+    description: Current patient needing assignment (severity, location)
+  step:
+    type: int
+    description: Current step number
+
+action_space:
+  type: dict
+  fields:
+    hospital_id:
+      type: int
+      description: ID of the target hospital
+    ambulance_id:
+      type: int
+      description: ID of the ambulance to dispatch
+
+reward:
+  range: [-1.0, 1.0]
+  description: >
+    Reward is based on delay ratio relative to patient's acceptable delay.
+    Penalties for invalid actions, overloaded hospitals, and high-risk delays.
+
+tasks:
+  - id: task_easy
+    file: tasks/easy.py
+    difficulty: easy
+    description: 1 patient, 2 hospitals, pick nearest
+
+  - id: task_medium
+    file: tasks/medium.py
+    difficulty: medium
+    description: 1 critical patient, hospitals with varying ICU capacity
+
+  - id: task_hard
+    file: tasks/hard.py
+    difficulty: hard
+    description: 3 patients with priority levels, limited resources
+
+inference:
+  script: inference.py
+  env_vars:
+    - API_BASE_URL
+    - MODEL_NAME
+    - HF_TOKEN
+    - OPENAI_API_KEY
+  log_format:
+    - "[START] task=... env=... model=..."
+    - "[STEP] step=N action=... reward=... done=..."
+    - "[END] success=... score=... steps=..."
+
+deployment:
+  platform: huggingface_spaces
+  framework: fastapi
+  port: 7860
+  endpoints:
+    - POST /reset
+    - POST /step
+    - GET  /state
+    - GET  /health
+    - GET  /tasks

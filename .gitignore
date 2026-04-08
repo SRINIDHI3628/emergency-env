@@ -1,0 +1,8 @@
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+DETAILED_ASSESSMENT.md
+FINAL_CHECKLIST.md
+REQUIREMENTS_CHECKLIST.md
