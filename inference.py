@@ -31,17 +31,7 @@ HF_TOKEN     = os.getenv("HF_TOKEN",     "")
 OPENAI_KEY   = os.getenv("OPENAI_API_KEY", "")
 
 # Initialize OpenAI client
-if (HF_TOKEN or OPENAI_KEY) and OpenAI is not None:
-    try:
-        client = OpenAI(
-            base_url=API_BASE_URL,
-            api_key=HF_TOKEN or OPENAI_KEY,
-        )
-    except Exception as e:
-        print(f"[WARN] Failed to initialize OpenAI client: {e}")
-        client = None
-else:
-    client = None  # Will use fallback
+client = None
 
 MAX_RETRIES = 3
 
@@ -102,26 +92,26 @@ Choose hospital_id and ambulance_id for the current_patient."""
 
 
 def fallback_action(state: Dict) -> Dict:
-    """Simple greedy fallback: pick first available hospital & ambulance."""
+    hospitals = state.get("hospitals", [])
+    ambulances = state.get("ambulances", [])
     patient = state.get("current_patient", {})
+
     needs_icu = patient.get("needs_icu", False)
 
-    for h in state["hospitals"]:
-        if needs_icu and h["available_icu"] > 0:
+    hosp_id = hospitals[0]["id"] if hospitals else 1
+    for h in hospitals:
+        if needs_icu and h.get("available_icu", 0) > 0:
             hosp_id = h["id"]
             break
-        elif not needs_icu and h["available_beds"] > 0:
+        elif not needs_icu and h.get("available_beds", 0) > 0:
             hosp_id = h["id"]
             break
-    else:
-        hosp_id = state["hospitals"][0]["id"]
 
-    for a in state["ambulances"]:
-        if a["available"]:
+    amb_id = ambulances[0]["id"] if ambulances else 1
+    for a in ambulances:
+        if a.get("available", False):
             amb_id = a["id"]
             break
-    else:
-        amb_id = state["ambulances"][0]["id"]
 
     return {"hospital_id": hosp_id, "ambulance_id": amb_id}
 
@@ -206,14 +196,18 @@ def run_task(task_name: str, verbose: bool = False) -> Dict[str, Any]:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run Emergency Env inference")
-    parser.add_argument("--task",    default="easy",  choices=["easy", "medium", "hard"])
-    parser.add_argument("--model",   default=None,    help="Override MODEL_NAME env var")
-    parser.add_argument("--verbose", action="store_true")
-    args = parser.parse_args()
+    try:
+        parser = argparse.ArgumentParser(description="Run Emergency Env inference")
+        parser.add_argument("--task",    default="easy",  choices=["easy", "medium", "hard"])
+        parser.add_argument("--model",   default=None,    help="Override MODEL_NAME env var")
+        parser.add_argument("--verbose", action="store_true")
+        args = parser.parse_args()
 
-    if args.model:
-        MODEL_NAME = args.model
+        if args.model:
+            MODEL_NAME = args.model
 
-    result = run_task(args.task, verbose=args.verbose)
-    print("\nFinal result:", json.dumps(result, indent=2))
+        result = run_task(args.task, verbose=args.verbose)
+        print("\nFinal result:", json.dumps(result, indent=2))
+    except Exception as e:
+        print(f"[ERROR] {str(e)}")
+        print("[END] success=false steps=0 score=0 rewards=")
