@@ -31,3 +31,6 @@ dependencies = [
 [project.urls]
 homepage = "https://github.com/yourusername/emergency-resource-allocation"
 repository = "https://github.com/yourusername/emergency-resource-allocation"
+
+[project.scripts]
+server = "server.app:main"
