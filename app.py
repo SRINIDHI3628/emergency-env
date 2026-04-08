@@ -60,17 +60,18 @@ def health():
 
 
 @app.post("/reset")
-def reset(req: ResetRequest):
+def reset(req: Optional[ResetRequest] = None):
     global _env, _current_task
-    if req.task not in TASKS:
-        raise HTTPException(status_code=400, detail=f"Unknown task: {req.task}. Choose from {list(TASKS.keys())}")
-    _current_task = req.task
-    _env = EmergencyEnv(TASKS[req.task]["config"])
+    task_name = req.task if req is not None else "easy"
+    if task_name not in TASKS:
+        raise HTTPException(status_code=400, detail=f"Unknown task: {task_name}. Choose from {list(TASKS.keys())}")
+    _current_task = task_name
+    _env = EmergencyEnv(TASKS[task_name]["config"])
     observation = _env.reset()
     return {
-        "task": req.task,
+        "task": task_name,
         "observation": observation.dict(),
-        "message": f"Environment reset for task '{req.task}'",
+        "message": f"Environment reset for task '{task_name}'",
     }
 
 
