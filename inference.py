@@ -30,10 +30,17 @@ MODEL_NAME   = os.getenv("MODEL_NAME",   "gpt-4o-mini")
 HF_TOKEN     = os.getenv("HF_TOKEN",     "")
 OPENAI_KEY   = os.getenv("OPENAI_API_KEY", "")
 
-# Initialize OpenAI client
-client = None
-
 MAX_RETRIES = 3
+
+# Initialize OpenAI client only if key is available
+client = None
+if OpenAI is not None:
+    api_key = HF_TOKEN or OPENAI_KEY
+    if api_key:
+        try:
+            client = OpenAI(api_key=api_key, base_url=API_BASE_URL)
+        except Exception as e:
+            print(f"[WARN] Could not init OpenAI client: {e}")
 
 
 # ─── LLM call ──────────────────────────────────────────────────────────────────
@@ -53,15 +60,15 @@ Respond ONLY with a JSON object in this exact format (no explanation, no markdow
 
 
 def call_llm(state: Dict) -> Dict:
-    """Send state to LLM, get action back."""
+    """Send state to LLM, get action back. Falls back to greedy agent if unavailable."""
     if client is None:
-        print("[WARN] No API key provided — using fallback greedy agent")
+        print("[WARN] No API client — using fallback greedy agent")
         return fallback_action(state)
-        
-    user_msg = f"""Current emergency state:
-{json.dumps(state, indent=2)}
 
-Choose hospital_id and ambulance_id for the current_patient."""
+    user_msg = (
+        f"Current emergency state:\n{json.dumps(state, indent=2)}\n\n"
+        f"Choose hospital_id and ambulance_id for the current_patient."
+    )
 
     for attempt in range(MAX_RETRIES):
         try:
@@ -75,28 +82,27 @@ Choose hospital_id and ambulance_id for the current_patient."""
                 max_tokens=100,
             )
             content = completion.choices[0].message.content.strip()
-            # Strip markdown fences if present
             content = content.replace("```json", "").replace("```", "").strip()
             action = json.loads(content)
+            assert "hospital_id" in action and "ambulance_id" in action
             return action
-        except (json.JSONDecodeError, KeyError) as e:
+        except (json.JSONDecodeError, KeyError, AssertionError) as e:
             print(f"[WARN] Parse error on attempt {attempt+1}: {e}")
             time.sleep(1)
         except Exception as e:
             print(f"[WARN] Request error on attempt {attempt+1}: {e}")
             time.sleep(2)
 
-    # Fallback: pick first available hospital + ambulance
-    print("[WARN] LLM failed — using fallback greedy agent")
+    print("[WARN] LLM failed after retries — using fallback greedy agent")
     return fallback_action(state)
 
 
 def fallback_action(state: Dict) -> Dict:
-    hospitals = state.get("hospitals", [])
+    """Simple greedy fallback: pick first available hospital & ambulance."""
+    hospitals  = state.get("hospitals", [])
     ambulances = state.get("ambulances", [])
-    patient = state.get("current_patient", {})
-
-    needs_icu = patient.get("needs_icu", False)
+    patient    = state.get("current_patient", {})
+    needs_icu  = patient.get("needs_icu", False)
 
     hosp_id = hospitals[0]["id"] if hospitals else 1
     for h in hospitals:
@@ -120,86 +126,81 @@ def fallback_action(state: Dict) -> Dict:
 
 def run_task(task_name: str, verbose: bool = False) -> Dict[str, Any]:
     task = TASKS[task_name]
-    env = EmergencyEnv(task["config"])
+    env  = EmergencyEnv(task["config"])
 
-    observation = env.reset()
-    task_id   = task["config"]["task_id"]
-    model_str = MODEL_NAME
+    # reset() returns a plain dict — NOT a Pydantic model
+    state    = env.reset()
+    task_id  = task["config"]["task_id"]
 
-    print(f"[START] task={task_id} env=EmergencyEnv model={model_str}")
+    print(f"[START] task={task_id} env=EmergencyEnv model={MODEL_NAME}")
 
-    step_num = 0
-    rewards = []
+    step_num     = 0
+    rewards      = []
     total_reward = 0.0
-    success = False
 
     while not env.done:
         step_num += 1
 
         if verbose:
             print(f"\n--- Step {step_num} ---")
-            print(json.dumps(observation.model_dump(), indent=2))
+            print(json.dumps(state, indent=2))
 
-        action = call_llm(observation.model_dump())
+        action = call_llm(state)           # state is already a plain dict
         result = env.step(action)
 
-        reward = result["reward"].value
+        # FIX 1: reward is a plain float, NOT an object with .value
+        reward = float(result["reward"])
+
+        # FIX 2: env returns "state" key, NOT "observation"
+        state  = result["state"]
+
         done   = result["done"]
         info   = result["info"]
-        observation = result["observation"]
-        
+
         rewards.append(reward)
         total_reward += reward
 
-        # Format action as string
-        action_str = json.dumps(action)
-        
-        # Check for errors (simplified - no errors in this env)
-        error = "null"
-
         print(
             f"[STEP] step={step_num} "
-            f"action={action_str} "
-            f"reward={reward:.2f} "
+            f"action={json.dumps(action)} "
+            f"reward={reward:.4f} "
             f"done={str(done).lower()} "
-            f"error={error}"
+            f"error=null"
         )
 
-    # Normalize score to [0,1]
-    max_possible = len(task["config"].get("patients", [{"id":1}]))
-    score = round(total_reward / max(max_possible, 1), 4)
-    score = max(0.0, min(1.0, score))   # clamp
+    # Normalize score to [0, 1]
+    max_possible = len(task["config"].get("patients", [{"id": 1}]))
+    score   = round(total_reward / max(max_possible, 1), 4)
+    score   = max(0.0, min(1.0, score))
 
-    # Check pass/fail
-    grader = task["grader"]
+    grader   = task["grader"]
     min_pass = grader.get("min_passing_reward", grader.get("min_passing_total_reward", 0.3))
-    success = total_reward >= min_pass
+    success  = total_reward >= min_pass
 
-    # Format rewards as comma-separated string
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    rewards_str = ",".join(f"{r:.4f}" for r in rewards)
 
     print(
         f"[END] success={str(success).lower()} "
+        f"score={score:.4f} "
         f"steps={step_num} "
-        f"score={score:.3f} "
         f"rewards={rewards_str}"
     )
 
     return {
-        "task": task_name,
-        "success": success,
-        "score": score,
-        "steps": step_num,
+        "task":         task_name,
+        "success":      success,
+        "score":        score,
+        "steps":        step_num,
         "total_reward": round(total_reward, 4),
-        "rewards": rewards,
+        "rewards":      rewards,
     }
 
 
 if __name__ == "__main__":
     try:
         parser = argparse.ArgumentParser(description="Run Emergency Env inference")
-        parser.add_argument("--task",    default="easy",  choices=["easy", "medium", "hard"])
-        parser.add_argument("--model",   default=None,    help="Override MODEL_NAME env var")
+        parser.add_argument("--task",    default="easy", choices=["easy", "medium", "hard"])
+        parser.add_argument("--model",   default=None,   help="Override MODEL_NAME env var")
         parser.add_argument("--verbose", action="store_true")
         args = parser.parse_args()
 
@@ -208,6 +209,8 @@ if __name__ == "__main__":
 
         result = run_task(args.task, verbose=args.verbose)
         print("\nFinal result:", json.dumps(result, indent=2))
+
     except Exception as e:
-        print(f"[ERROR] {str(e)}")
-        print("[END] success=false steps=0 score=0 rewards=")
+        # Never exit with non-zero status — always print [END]
+        print(f"[ERROR] {e}")
+        print("[END] success=false score=0.0000 steps=0 rewards=")
