@@ -198,19 +198,33 @@ def run_task(task_name: str, verbose: bool = False) -> Dict[str, Any]:
 
 if __name__ == "__main__":
     try:
-        parser = argparse.ArgumentParser(description="Run Emergency Env inference")
-        parser.add_argument("--task",    default="easy", choices=["easy", "medium", "hard"])
-        parser.add_argument("--model",   default=None,   help="Override MODEL_NAME env var")
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--task", default=None, choices=["easy", "medium", "hard"])
+        parser.add_argument("--model", default=None)
         parser.add_argument("--verbose", action="store_true")
         args = parser.parse_args()
 
         if args.model:
             MODEL_NAME = args.model
 
-        result = run_task(args.task, verbose=args.verbose)
-        print("\nFinal result:", json.dumps(result, indent=2))
+        # If specific task given, run just that one
+        # If no task given, run ALL 3 tasks (validator expects this)
+        tasks_to_run = [args.task] if args.task else ["easy", "medium", "hard"]
+
+        all_results = []
+        for task_name in tasks_to_run:
+            result = run_task(task_name, verbose=args.verbose)
+            all_results.append(result)
+
+        print("\n[SUMMARY]")
+        for r in all_results:
+            print(
+                f"task={r['task']} "
+                f"grader=reward_threshold "
+                f"score={r['score']:.4f} "
+                f"success={str(r['success']).lower()}"
+            )
 
     except Exception as e:
-        # Never exit with non-zero status — always print [END]
         print(f"[ERROR] {e}")
         print("[END] success=false score=0.0000 steps=0 rewards=")
