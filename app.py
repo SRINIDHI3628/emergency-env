@@ -47,6 +47,11 @@ class StepRequest(BaseModel):
     hospital_id: int
     ambulance_id: int
 
+class GraderRequest(BaseModel):
+    task: str = "easy"
+    hospital_id: int
+    ambulance_id: int
+
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 @app.get("/")
@@ -110,6 +115,30 @@ def list_tasks():
             "num_patients": len(data["config"].get("patients", [])),
             "num_hospitals": len(data["config"]["hospitals"]),
             "num_ambulances": len(data["config"]["ambulances"]),
+            "grader": {
+                "type": "reward_threshold",
+                "min_score": data["grader"].get("min_passing_reward", 
+                             data["grader"].get("min_passing_total_reward", 0.3)),
+                "reward_range": [-1.0, 1.0],
+            }
         }
         for name, data in TASKS.items()
+    }
+
+@app.post("/grader")
+def grade(req: GraderRequest):
+    if req.task not in TASKS:
+        raise HTTPException(status_code=400, detail=f"Unknown task: {req.task}")
+    env = EmergencyEnv(TASKS[req.task]["config"])
+    env.reset()
+    action = {"hospital_id": req.hospital_id, "ambulance_id": req.ambulance_id}
+    result = env.step(action)
+    reward = float(result["reward"].value)
+    grader = TASKS[req.task]["grader"]
+    min_pass = grader.get("min_passing_reward", grader.get("min_passing_total_reward", 0.3))
+    return {
+        "score": round(max(0.0, min(1.0, reward)), 4),
+        "reward": reward,
+        "passed": reward >= min_pass,
+        "info": result["info"],
     }
