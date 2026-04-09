@@ -129,7 +129,7 @@ def run_task(task_name: str, verbose: bool = False) -> Dict[str, Any]:
     env  = EmergencyEnv(task["config"])
 
     # reset() returns a plain dict — NOT a Pydantic model
-    state    = env.reset()
+    state = env.reset().dict()
     task_id  = task["config"]["task_id"]
 
     print(f"[START] task={task_id} env=EmergencyEnv model={MODEL_NAME}")
@@ -149,10 +149,10 @@ def run_task(task_name: str, verbose: bool = False) -> Dict[str, Any]:
         result = env.step(action)
 
         # FIX 1: reward is a plain float, NOT an object with .value
-        reward = float(result["reward"])
+        reward = float(result["reward"].value)
 
         # FIX 2: env returns "state" key, NOT "observation"
-        state  = result["state"]
+        state  = result["observation"].dict()
 
         done   = result["done"]
         info   = result["info"]
